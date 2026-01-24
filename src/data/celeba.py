@@ -242,6 +242,10 @@ class CelebADataset(Dataset):
         # For Data augmentation you can do something like
         # if self.augment and self.split == "train":
         #     transform_list.append(...)
+        transform_list.append(transforms.ToTensor())
+        if self.augment and self.split == "train":
+            transform_list.append(transforms.RandomHorizontalFlip())
+        transform_list.append(transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)))  # Normalize to [-1, 1]
 
         return transforms.Compose(transform_list)
 

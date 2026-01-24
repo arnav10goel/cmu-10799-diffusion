@@ -1,6 +1,6 @@
 data:
   dataset: "celeba"
-  root: # Your dataset path
+  root: "/home/arnavgoe/10799-Diffusion/cmu-10799-diffusion/data" # Your dataset path
   from_hub: false  # run "python download_dataset.py --output_dir YOUR_PATH" first if you want to use false here
   repo_name: "electronickale/cmu-10799-celeba64-subset"
   image_size: 64
@@ -11,13 +11,13 @@ data:
 
 # TODO: build your model architecture, feel free to add or exclude any of these options
 model:
-  base_channels: # int
-  channel_mult: # list of int [1, 2, 2, 4]
-  num_res_blocks: # TODO
-  attention_resolutions: # list of int
-  num_heads: # int
-  dropout: # float
-  use_scale_shift_norm: # bool
+  base_channels: 64 # int
+  channel_mult: [1, 2, 2, 4] # list of int [1, 2, 2, 4]
+  num_res_blocks: 2 # TODO
+  attention_resolutions: [16, 8] # list of int
+  num_heads: 4 # int
+  dropout: 0.1 # float
+  use_scale_shift_norm: true # bool
 
 # TODO: your training hyperparameters, feel free to add or exclude any of these options
 training:
@@ -36,9 +36,9 @@ training:
 
 # TODO: your ddpm algorithm hyperparameters, feel free to add or exclude any of these options
 ddpm:
-  num_timesteps: # int
-  beta_start: # float
-  beta_end: # float
+  num_timesteps: 1000   # int
+  beta_start: 0.0001 # float
+  beta_end: 0.02 # float
 
 sampling:
   num_steps: # int
@@ -56,7 +56,7 @@ checkpoint:
   resume: null
 
 logging:
-  dir: "./logs"
+  dir: "/home/arnavgoe/10799-Diffusion/cmu-10799-diffusion/logs"
   wandb:
     enabled: true
     project: "cmu-10799-diffusion"
