@@ -16,12 +16,12 @@ set -e
 
 # Defaults
 METHOD="ddpm" # (right now you only have ddpm but you will be implementing more methods as hw progresses)
-CHECKPOINT="YOUR_PATH"
-DATASET_PATH="data/celeba"
+CHECKPOINT="/home/arnavgoe/10799-Diffusion/cmu-10799-diffusion/logs/ddpm_20260125_131450/checkpoints/ddpm_final.pt"
+DATASET_PATH="/home/arnavgoe/10799-Diffusion/cmu-10799-diffusion/data/train/images"
 METRICS="kid"
 NUM_SAMPLES=1000
-BATCH_SIZE=256
-NUM_STEPS=1000
+BATCH_SIZE=128
+NUM_STEPS=700
 GENERATED_DIR=""  # Will be set based on checkpoint location
 CACHE_DIR=""      # Will be set based on checkpoint location
 
@@ -46,7 +46,7 @@ fi
 
 # Set output directories based on checkpoint location
 CHECKPOINT_DIR=$(dirname "$CHECKPOINT")
-GENERATED_DIR="${CHECKPOINT_DIR}/samples/generated"
+GENERATED_DIR="${CHECKPOINT_DIR}/samples/generated_${NUM_STEPS}"
 CACHE_DIR="${CHECKPOINT_DIR}/samples/cache"
 
 echo "=========================================="

@@ -32,7 +32,7 @@ import torch
 from tqdm import tqdm
 
 from src.models import create_model_from_config
-from src.data import save_image
+from src.data import save_image, unnormalize
 from src.methods import DDPM
 from src.utils import EMA
 
@@ -67,7 +67,13 @@ def save_samples(
         num_samples: Number of samples, used to calculate grid layout.
     """
 
-    raise NotImplementedError
+    # raise NotImplementedError
+    # 1. Unnormalize samples from [-1, 1] to [0, 1]
+    samples = unnormalize(samples)
+    
+    # 2. Save using helper function
+    save_image(samples, save_path)
+    print(f"Saved sample grid to {save_path}")
 
 
 def main():
@@ -122,6 +128,9 @@ def main():
     else:
         raise ValueError(f"Unknown method: {args.method}. Only 'ddpm' is currently supported.")
     
+    # Move model to device
+    method.to(device)
+    
     # Apply EMA weights
     if not args.no_ema:
         print("Using EMA weights")
@@ -151,22 +160,29 @@ def main():
         while remaining > 0:
             batch_size = min(args.batch_size, remaining)
 
-            num_steps = args.num_steps or config['sampling']['num_steps']
+            # num_steps = args.num_steps or config['sampling']['num_steps']
+            default_steps = config.get('ddpm', {}).get('num_timesteps', 1000)
+            num_steps = args.num_steps or config.get('sampling', {}).get('num_steps', default_steps)
 
             samples = method.sample(
                 batch_size=batch_size,
                 image_shape=image_shape,
+                verbose=False,
                 num_steps=num_steps,
                 # TODO: add your arugments here
             )
+            
+            if isinstance(samples, list) or isinstance(samples, tuple):
+                samples = samples[-1]
 
             # Save individual images immediately or collect for grid
             if args.grid:
-                all_samples.append(samples)
+                all_samples.append(samples.cpu())
             else:
                 for i in range(samples.shape[0]):
+                    single_sample = samples[i]
                     img_path = os.path.join(args.output_dir, f"{sample_idx:06d}.png")
-                    save_samples(samples, img_path, 1)
+                    save_samples(single_sample.unsqueeze(0), img_path, 1)
                     sample_idx += 1
 
             remaining -= batch_size

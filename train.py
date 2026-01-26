@@ -38,6 +38,8 @@ import torch.distributed as dist
 from torch.amp import GradScaler, autocast
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
+import torchvision
+from torchvision.utils import make_grid
 from tqdm import tqdm
 
 from src.models import UNet, create_model_from_config
@@ -232,13 +234,25 @@ def generate_samples(
     """
     method.eval_mode()
 
+    # 1. Apply EMA parameters if available and conditions are met
     ema_start = config.get('training', {}).get('ema_start', 0)
     use_ema = ema is not None and (current_step is None or current_step >= ema_start)
     if use_ema:
+        print("DEBUG: Using EMA parameters for sampling")
         ema.apply_shadow()
 
-    samples = None
+    # samples = None
     # TODO: sample with your method.sample()
+    # 2. We sample with our method's sampling function
+    samples = method.sample(
+        batch_size=num_samples,
+        image_shape=image_shape,
+        verbose=False,
+    )
+    
+    # 2b. Handle if samples is a trajectory (list of tensors)
+    if isinstance(samples, list) or isinstance(samples, tuple):
+        samples = samples[-1]
 
     if use_ema:
         ema.restore()
@@ -253,7 +267,7 @@ def save_samples(
     num_samples: int,
 ) -> None:
     """
-    TODO: save generated samples as images.
+    TODO: save generated samples as images. (In a grid format ideally)
 
     Args:
         samples: Generated samples tensor with shape (num_samples, C, H, W).
@@ -261,7 +275,13 @@ def save_samples(
         num_samples: Number of samples, used to calculate grid layout.
     """
 
-    raise NotImplementedError
+    # raise NotImplementedError
+    # 1. Unnormalize samples from [-1, 1] to [0, 1]
+    samples = unnormalize(samples)
+    
+    # 2. Save using helper function
+    save_image(samples, save_path)
+    print(f"Saved sample grid to {save_path}")
 
 
 def train(
@@ -400,6 +420,9 @@ def train(
     else:
         raise ValueError(f"Unknown method: {method_name}. Only 'ddpm' is currently supported.")
 
+    # Move method to device
+    method.to(device)
+    
     # Create optimizer
     optimizer = create_optimizer(model, config) # default to AdamW optimizer
 
