@@ -287,6 +287,87 @@ class DDPM(BaseMethod):
         #     history[-1] = torch.clamp(history[-1], -1.0, 1.0)
         return history
     
+    # DDIM Sampling
+    @torch.no_grad()
+    def sample_ddim(
+        self,
+        batch_size: int,
+        image_shape: Tuple[int, int, int],
+        verbose: bool = True,
+        num_steps: Optional[int] = 1000,
+        **kwargs
+    ) -> torch.Tensor:
+        """
+        Deterministic DDIM sampling implementation (Faster sampling)
+        
+        Equation:
+        x_{t-1} = sqrt(alpha_prev) * pred_x0 + sqrt(1 - alpha_prev) * pred_noise
+        
+        Args:
+            batch_size: Number of samples
+            image_shape: (C, H, W)
+            num_steps: Number of DDIM steps (e.g. 50)
+            
+        Returns:
+            List of samples [x_T, ..., x_0]
+        """
+        self.eval_mode()
+        device = self.device
+        
+        # 1. Generate timesteps for DDIM sampling
+        # Get evenly spaced timesteps (eg: if T = 1000 and num_steps = 50, then we get [0, 20, 40, ..., 980])
+        times = torch.linspace(0, self.num_timesteps-1, steps=num_steps+1, device=device).long() # (num_steps,)
+        
+        # Clip times to be within valid range
+        times = torch.clamp(times, 0, self.num_timesteps - 1)
+        
+        # Reverse the times for sampling from T to 0
+        times = torch.flip(times, dims=[0]) # (num_steps,)
+        
+        # 2. Start from pure noise x_T
+        x_t = torch.randn((batch_size, *image_shape), device=device) # (B, C, H, W)
+        history = [x_t.cpu()]
+        
+        # 3. Iteratively apply DDIM sampling steps
+        iterator = range(num_steps)
+        if verbose:
+            from tqdm import tqdm
+            iterator = tqdm(iterator, desc="DDIM Sampling", total=num_steps)
+            
+        for i in iterator:
+            t = times[i]
+            t_prev = times[i+1]  # We end at (20, 0) as we initialize times with num_steps + 1
+            
+            # Broadcast indices
+            timestep = torch.full((batch_size,), t, device=device, dtype=torch.long) # (B,)
+            timestep_prev = torch.full((batch_size,), t_prev, device=device, dtype=torch.long) # (B,)
+            
+            # A. Get model prediction (eps_theta(x_t, t))
+            model_output = self.model(x_t, timestep) # (B, C, H, W)
+            
+            # B. Get alpha_bar_t and alpha_bar_t-1
+            alpha_bar_t = self._extract(self.alphas_cumprod, timestep, x_t.shape) # (B, 1, 1, 1)
+            alpha_bar_t_prev = self._extract(self.alphas_cumprod, timestep_prev, x_t.shape) # (B, 1, 1, 1)
+            
+            # C. Compute predicted x_0 and predicted noise
+            if self.parameterization == "epsilon":
+                pred_x0 = (x_t - torch.sqrt(1 - alpha_bar_t) * model_output) / torch.sqrt(alpha_bar_t)
+                pred_noise = model_output
+            elif self.parameterization == "x0":
+                pred_x0 = model_output
+                pred_noise = (x_t - torch.sqrt(alpha_bar_t) * pred_x0) / torch.sqrt(1 - alpha_bar_t)
+            else:
+                raise ValueError(f"Unknown parameterization: {self.parameterization}")
+            
+            # D. Compute x_{t-1} using DDIM formula
+            x_t_1 = torch.sqrt(alpha_bar_t_prev) * pred_x0 + torch.sqrt(1 - alpha_bar_t_prev) * pred_noise # (B, C, H, W)
+            history.append(x_t_1.cpu())
+            
+            # Update x_t for next iteration
+            x_t = x_t_1
+            
+        return history        
+    
     # =========================================================================
     # Device / state
     # =========================================================================
