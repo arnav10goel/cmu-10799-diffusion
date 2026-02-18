@@ -50,6 +50,12 @@ def load_checkpoint(checkpoint_path: str, device: torch.device):
     ema = EMA(model, decay=config['training']['ema_decay'])
     ema.load_state_dict(checkpoint['ema'])
     
+    # # Create EMA and load if available in checkpoint
+    # ema = None
+    # if 'ema' in checkpoint:
+    #     ema = EMA(model, decay=config['training']['ema_decay'])
+    #     ema.load_state_dict(checkpoint['ema'])
+    
     return model, config, ema
 
 
@@ -170,20 +176,23 @@ def main():
             # default_steps = config.get('ddpm', {}).get('num_timesteps', 1000)
             # num_steps = args.num_steps or config.get('sampling', {}).get('num_steps', default_steps)
             
-            if args.num_steps:
+            if args.num_steps is not None:
                 num_steps = args.num_steps
-            elif args.method == 'flow_matching':
-                # Flow Matching works great with fewer steps (e.g. 50-100)
-                # Check config or default to 100
-                num_steps = config.get('sampling', {}).get('num_steps', 100)
-            else: # DDPM
-                # Default to training timesteps (usually 1000)
+            elif args.method == 'ddpm':
+                # DDPM sampling defaults to training discretization
                 num_steps = config.get('ddpm', {}).get('num_timesteps', 1000)
+            else:
+                # Flow Matching can use fewer inference steps than training scale
+                num_steps = config.get('sampling', {}).get('num_steps', 100)
             
             print(f"Sampling with {num_steps} steps...")
 
+            effective_sampler = args.sampler
+            if effective_sampler == 'default':
+                effective_sampler = config.get('sampling', {}).get('sampler', 'default')
+
             # SAMPLING LOGIC
-            if args.sampler == 'ddim':
+            if effective_sampler == 'ddim':
                 if not isinstance(method, DDPM):
                     raise ValueError("DDIM sampler is only supported for DDPM method.")
                 

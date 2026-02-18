@@ -44,7 +44,7 @@ if [ $# -gt 0 ]; then
 fi
 
 echo "=============================================="
-echo "CMU 10799 Diffusion & Flow Matching Homework Training Job"
+echo "ReFlow Distillation Training Script"
 echo "=============================================="
 echo "Method: $METHOD"
 if [ -n "$CONFIG_FILE" ]; then

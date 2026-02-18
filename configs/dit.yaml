@@ -1,0 +1,65 @@
+data:
+  dataset: "celeba"
+  root: "/home/arnavgoe/10799-Diffusion/cmu-10799-diffusion/data"
+  from_hub: false
+  repo_name: "electronickale/cmu-10799-celeba64-subset"
+  image_size: 64
+  channels: 3
+  num_workers: 4
+  pin_memory: true
+  augment: true
+
+model:
+  type: "dit"
+  patch_size: 4
+  hidden_size: 384
+  depth: 6
+  num_heads: 6
+  mlp_ratio: 4.0
+  class_dropout_prob: 0.0
+  learn_sigma: false
+
+training:
+  batch_size: 128
+  learning_rate: 0.0002
+  weight_decay: 0.0
+  betas: [0.9, 0.999]
+  ema_decay: 0.9999
+  ema_start: 1000
+  gradient_clip_norm: 1.0
+  num_iterations: 120000
+  log_every: 10
+  sample_every: 10000
+  save_every: 20000
+  num_samples: 16
+
+ddpm:
+  num_timesteps: 1000
+  beta_start: 0.0001
+  beta_end: 0.02
+  parameterization: "epsilon"
+
+flow_matching:
+  num_timesteps: 1000
+
+sampling:
+  num_steps: 1000
+  sampler: "ddpm"
+
+infrastructure:
+  seed: 42
+  device: "cuda"
+  num_gpus: 1
+  mixed_precision: true
+  compile_model: false
+
+checkpoint:
+  dir: "/data/user_data/arnavgoe/cmu-10799-diffusion/checkpoints_v2"
+  resume: null
+
+logging:
+  dir: "/home/arnavgoe/10799-Diffusion/cmu-10799-diffusion/logs"
+  wandb:
+    enabled: true
+    project: "cmu-10799-diffusion-dit"
+    entity: null

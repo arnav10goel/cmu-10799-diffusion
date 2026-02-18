@@ -60,7 +60,8 @@ def load_config(config_path: str) -> dict:
 def setup_logging(config: dict, method_name: str) -> tuple[str, Any]:
     """Set up logging directories and wandb. Returns (log_dir, wandb_run)."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = os.path.join(config['logging']['dir'], f"{method_name}_{timestamp}")
+    wandb_run_name = config['logging'].get('wandb_run_name', f"{method_name}_{timestamp}")
+    log_dir = os.path.join(config['logging']['dir'], wandb_run_name)
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(os.path.join(log_dir, 'samples'), exist_ok=True)
     os.makedirs(os.path.join(log_dir, 'checkpoints'), exist_ok=True)
@@ -79,7 +80,7 @@ def setup_logging(config: dict, method_name: str) -> tuple[str, Any]:
             wandb_run = wandb.init(
                 project=wandb_config.get('project', 'cmu-10799-diffusion'),
                 entity=wandb_config.get('entity', None),
-                name=f"{method_name}_{timestamp}",
+                name=wandb_run_name,
                 config=config,
                 dir=log_dir,
                 tags=[method_name],
@@ -241,17 +242,38 @@ def generate_samples(
         print("DEBUG: Using EMA parameters for sampling")
         ema.apply_shadow()
 
-    # samples = None
-    # TODO: sample with your method.sample()
-    # 2. We sample with our method's sampling function
-    sampling_steps = config.get('sampling', {}).get('num_steps', None)
-    
-    samples = method.sample(
-        batch_size=num_samples,
-        image_shape=image_shape,
-        verbose=False,
-        num_steps=sampling_steps
-    )
+    # 2. Sample with method-specific defaults
+    sampling_config = config.get('sampling', {})
+    ddpm_config = config.get('ddpm', {})
+
+    if method_name == 'ddpm':
+        # DDPM inference steps should match DDPM training timestep discretization
+        sampling_steps = ddpm_config.get('num_timesteps', 1000)
+        sampler_name = sampling_config.get('sampler', 'default')
+
+        if sampler_name == 'ddim' and hasattr(method, 'sample_ddim'):
+            samples = method.sample_ddim(
+                batch_size=num_samples,
+                image_shape=image_shape,
+                verbose=False,
+                num_steps=sampling_steps,
+            )
+        else:
+            samples = method.sample(
+                batch_size=num_samples,
+                image_shape=image_shape,
+                verbose=False,
+                num_steps=sampling_steps,
+            )
+    else:
+        # Flow Matching commonly uses fewer ODE solver steps at inference time
+        sampling_steps = sampling_config.get('num_steps', 100)
+        samples = method.sample(
+            batch_size=num_samples,
+            image_shape=image_shape,
+            verbose=False,
+            num_steps=sampling_steps,
+        )
     
     # 2b. Handle if samples is a trajectory (list of tensors)
     if isinstance(samples, list) or isinstance(samples, tuple):
@@ -500,26 +522,41 @@ def train(
     single_batch_base = None  # Store the original small batch
     if overfit_single_batch:
         single_batch_base = next(data_iter)
-        if isinstance(single_batch_base, (tuple, list)):
-            single_batch_base = single_batch_base[0]  # Handle (image, label) tuples
-        single_batch_base = single_batch_base.to(device)
-
-        # Replicate to match desired batch size
-        base_batch_size = single_batch_base.shape[0]
-        desired_batch_size = training_config['batch_size']
-
-        if desired_batch_size > base_batch_size:
-            # Replicate the batch to reach desired size
-            num_repeats = (desired_batch_size + base_batch_size - 1) // base_batch_size
-            single_batch = single_batch_base.repeat(num_repeats, 1, 1, 1)[:desired_batch_size]
-            if is_main_process:
-                print(f"Cached single batch: {base_batch_size} samples replicated to {desired_batch_size}")
-                print(f"  Base batch shape: {single_batch_base.shape}")
-                print(f"  Training batch shape: {single_batch.shape}")
+        
+        # Handling if dataloader returns dictionary for distillation (e.g., {'image': ..., 'label': ...})
+        if isinstance(single_batch_base, dict) and 'x_0' in single_batch_base:
+            # Replicate both components
+            base_batch_size = single_batch_base['x_0'].shape[0]
+            desired_batch_size = training_config['batch_size']
+            if desired_batch_size > base_batch_size:
+                num_repeats = (desired_batch_size + base_batch_size - 1) // base_batch_size
+                single_batch = {
+                    'x_0': single_batch_base['x_0'].repeat(num_repeats, 1, 1, 1)[:desired_batch_size].to(device),
+                    'x_1': single_batch_base['x_1'].repeat(num_repeats, 1, 1, 1)[:desired_batch_size].to(device)
+                }
+            else:
+                single_batch = {k: v.to(device) for k, v in single_batch_base.items()}
         else:
-            single_batch = single_batch_base
-            if is_main_process:
-                print(f"Cached single batch with shape: {single_batch.shape}")
+            if isinstance(single_batch_base, (tuple, list)):
+                single_batch_base = single_batch_base[0]  # Handle (image, label) tuples
+            single_batch_base = single_batch_base.to(device)
+
+            # Replicate to match desired batch size
+            base_batch_size = single_batch_base.shape[0]
+            desired_batch_size = training_config['batch_size']
+
+            if desired_batch_size > base_batch_size:
+                # Replicate the batch to reach desired size
+                num_repeats = (desired_batch_size + base_batch_size - 1) // base_batch_size
+                single_batch = single_batch_base.repeat(num_repeats, 1, 1, 1)[:desired_batch_size]
+                if is_main_process:
+                    print(f"Cached single batch: {base_batch_size} samples replicated to {desired_batch_size}")
+                    print(f"  Base batch shape: {single_batch_base.shape}")
+                    print(f"  Training batch shape: {single_batch.shape}")
+            else:
+                single_batch = single_batch_base
+                if is_main_process:
+                    print(f"Cached single batch with shape: {single_batch.shape}")
 
     metrics_sum = {}
     metrics_count = 0
@@ -545,16 +582,34 @@ def train(
                 data_iter = iter(dataloader)
                 batch = next(data_iter)
 
-            if isinstance(batch, (tuple, list)):
-                batch = batch[0]  # Handle (image, label) tuples
-
-            batch = batch.to(device)
+        # if isinstance(batch, (tuple, list)):
+        #     batch = batch[0]  # Handle (image, label) tuples
         
         # Forward pass with mixed precision
         optimizer.zero_grad()
         
-        with autocast(device_type, enabled=config['infrastructure']['mixed_precision']):
-            loss, metrics = method.compute_loss(batch)
+        # === REFLOW LOGIC MODIFICATION ===
+        if isinstance(batch, dict) and 'x_0' in batch and 'x_1' in batch:
+            # Case 1: Reflow (Distillation) Dataset
+            # It yields a dictionary with 'x_0' (noise) and 'x_1' (target image)
+            x_1 = batch['x_1'].to(device)
+            x_0 = batch['x_0'].to(device)
+            
+            with autocast(device_type, enabled=config['infrastructure']['mixed_precision']):
+                # We pass x_0 explicitly to compute_loss
+                loss, metrics = method.compute_loss(x_1, x_0=x_0)
+        else:
+            # Case 2: Standard Dataset (CelebA)
+            # It yields tuples (img, label) or just img tensor
+            if isinstance(batch, (tuple, list)):
+                batch = batch[0]  # Discard labels
+            
+            batch = batch.to(device)
+            
+            with autocast(device_type, enabled=config['infrastructure']['mixed_precision']):
+                # Standard call (x_0 is sampled internally)
+                loss, metrics = method.compute_loss(batch)
+        # =================================
         
         # Backward pass
         scaler.scale(loss).backward()

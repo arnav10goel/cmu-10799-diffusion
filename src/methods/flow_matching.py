@@ -23,9 +23,9 @@ class FlowMatching(BaseMethod):
         # It comes from your config (e.g., ddpm: num_timesteps: 1000)
         self.num_timesteps = int(num_timesteps)
 
-    def compute_loss(self, x_1: torch.Tensor, **kwargs) -> Tuple[torch.Tensor, Dict[str, float]]:
+    def compute_loss(self, x_1: torch.Tensor, x_0: Optional[torch.Tensor] = None, **kwargs) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
-        Computes the Flow Matching loss (Conditional Flow Matching).
+        Computes the Flow Matching loss (Rectified Flow Matching).
         
         Assuming shape of x_1 is (B, C, H, W)
         1. Sample noise x_0 ~ N(0, I)
@@ -35,11 +35,14 @@ class FlowMatching(BaseMethod):
         5. Predict velocity v_pred = model(x_t, t)
         6. MSE Loss: L = ||v_pred - v_target||^2
         7. Return loss and metrics
+        
+        If we input x_0, we can use this model for creating coupling flows for ReFlow
         """
         batch_size = x_1.shape[0]
         
         # 1. Sample noise x_0 ~ N(0, I)
-        x_0 = torch.randn_like(x_1) # (B, C, H, W)
+        if x_0 is None:
+            x_0 = torch.randn_like(x_1) # (B, C, H, W)
         
         # 2. Sample time t uniformly [0, 1]
         t = torch.rand((batch_size,), device=self.device)
@@ -69,6 +72,7 @@ class FlowMatching(BaseMethod):
         image_shape: Tuple[int, int, int],
         verbose: bool = True,
         num_steps: Optional[int] = None,
+        noise: Optional[torch.Tensor] = None, # Argument for ReFlow coupling flows, not used in standard sampling
         **kwargs
     ) -> List[torch.Tensor]:
         """
@@ -83,8 +87,14 @@ class FlowMatching(BaseMethod):
         if num_steps is None:
             num_steps = self.num_timesteps
             
-        # 1. Start from pure noise (t=0)
-        x = torch.randn((batch_size, *image_shape), device=device)
+        # 1. Start from pure noise (t=0) or provided noise for coupling flows
+        if noise is not None:
+            x = noise.to(device)
+            # Handle batch size mismatch if necessary
+            if x.shape[0] != batch_size:
+                 x = x[:batch_size]
+        else:
+            x = torch.randn((batch_size, *image_shape), device=device)
         
         history = [x.cpu()]
         

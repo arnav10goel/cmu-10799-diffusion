@@ -17,14 +17,14 @@
 set -e
 
 # Defaults
-METHOD="ddpm"
-SAMPLER="ddim" # Default sampler
-CHECKPOINT="/home/arnavgoe/10799-Diffusion/cmu-10799-diffusion/logs/ddpm_20260125_081432_zero_dropout_final_model/checkpoints/ddpm_final.pt"
+METHOD="flow_matching"
+SAMPLER="default"
+CHECKPOINT="/home/arnavgoe/10799-Diffusion/cmu-10799-diffusion/logs/reflow_unet_distillation/checkpoints/flow_matching_final.pt"
 DATASET_PATH="/home/arnavgoe/10799-Diffusion/cmu-10799-diffusion/data/train/images"
 METRICS="kid"
 NUM_SAMPLES=1000
 BATCH_SIZE=128
-NUM_STEPS=1000
+NUM_STEPS=""
 GENERATED_DIR=""
 CACHE_DIR=""
 
@@ -46,6 +46,25 @@ done
 if [ -z "$CHECKPOINT" ]; then
     echo "Error: --checkpoint is required"
     exit 1
+fi
+
+if [ -z "$NUM_STEPS" ]; then
+    NUM_STEPS=$(python - "$CHECKPOINT" "$METHOD" <<'PY'
+import sys
+import torch
+
+checkpoint_path = sys.argv[1]
+method = sys.argv[2]
+
+ckpt = torch.load(checkpoint_path, map_location='cpu')
+cfg = ckpt.get('config', {})
+
+if method == 'ddpm':
+    print(cfg.get('ddpm', {}).get('num_timesteps', 1000))
+else:
+    print(cfg.get('sampling', {}).get('num_steps', 100))
+PY
+)
 fi
 
 if [ ! -d "$DATASET_PATH" ]; then
